@@ -19,9 +19,12 @@ uint8_t i = 0;                  //loop variable for adc read
 uint8_t vs = 0;                 //determine the valve status. 0 -> closed, 1 -> open
 uint8_t vth = 0;                //determine if in threshold voltage zone
 uint16_t adc_result = 0;        //holds adc result
+int size_array;
+int charge = 0;
 char cycle[2];
-char message[50] = "";                  //cycle time is saved here
-char total_percent[41] = "The percent of the battery is currently: ";
+char message[50];                  //cycle time is saved here
+char total_percent[42] = "The percent of the battery is currently: \0";
+char number_of_ticks[33] = "the current number of ticks is: \0";
 
 
 #define FIFO_SIZE 128
@@ -31,15 +34,7 @@ char total_percent[41] = "The percent of the battery is currently: ";
 #define BAUD 9600
 #define MYUBRR FOSC/16/BAUD-1
 
-ISR(USART_RX_vect){//RX complete
 
-}
-ISR(USART_TX_vect){//TX complete
-
-}
-ISR(USART_UDRE_vect){//Data register empty
-
-}
 
 struct fifo_struct{
     uint8_t size;           /* size of buffer in bytes */
@@ -51,16 +46,12 @@ struct fifo_struct{
 typedef struct fifo_struct fifos;
 
 uint8_t FifoDataLength (fifos *fifo){
-  if(fifo->write > fifo->read){
+  if(fifo->write > fifo->read)
     return((fifo->write - fifo->read - 1));
-  }
-  else if(fifo->write < fifo->read){
+  else if(fifo->write < fifo->read)
     return ((FIFO_SIZE + fifo->write - fifo->read - 1));
-  }
-  else{
+  else
     return (FIFO_SIZE);
-  }
-    // return length of valid data in fifo
   return ((fifo->write - fifo->read) & (fifo->size - 1));
 }
 
@@ -81,8 +72,7 @@ uint8_t FifoWrite (fifos *fifo, unsigned char data){
 
 uint8_t FifoRead (fifos *fifo, unsigned char *data){
     // fifo empty : error
-    if (FifoDataLength(fifo) == FIFO_SIZE)
-    {
+    if (FifoDataLength(fifo) == FIFO_SIZE){
         return 1;
     }
     // read data & increment read pointer
@@ -95,13 +85,12 @@ uint8_t FifoRead (fifos *fifo, unsigned char *data){
 }
 
 void fill(fifos *fifo, char message[50]){
-  int i = sizeof(message);
-  fifo->read = fifo->write;
-  fifo->write = fifo->write + i;
-  if(fifo->write > FIFO_SIZE){
-    fifo->write = fifo->write - FIFO_SIZE;
+ int j = 0;
+  while(j<size_array){
+    fifo->buffer[fifo->write] = message[j];
+    fifo->write = fifo->write + 1;
+    j++;
   }
-  strcpy(fifo->buffer,message);
 } 
 
 void USART_Transmit(unsigned int data ){
@@ -149,18 +138,63 @@ void setLEDs(int value){
     }
 }
 
+ISR(USART_RX_vect){//RX complete
+
+}
+ISR(USART_TX_vect){//TX complete
+
+}
+ISR(USART_UDRE_vect){//Data register empty
+
+}
+ISR(PCINT2_vect){
+  uint8_t i;
+  for (i = 0; i<101; i++){
+			setLEDs(i);
+			_delay_ms(5);
+		  }
+
+  if ((PIND & (1<<3)) == (1<<3)){
+    fifos fifo = {.read = 0, .write = 1};
+    unsigned char data;
+    char to_user[50];
+    memset(to_user, '\0', sizeof(to_user)); 
+    sprintf(to_user, "%s%d\n", number_of_ticks,charge);
+    size_array = sizeof(to_user);
+    fill(&fifo,to_user);
+    while(1){
+    if (FifoDataLength(&fifo) > 0){
+        FifoRead(&fifo, &data);
+        USART_Transmit(data);
+      }
+    }
+  }
+
+  if ((PIND & (1<<2)) == (1<<2)){
+    charge++;
+  }
+}
+
+
 //********************************************************//
 //                Main function
 //********************************************************//
 int main(){
 	//uint8_t i;
+  sei();
+  EIMSK |= (1 << INT0) | (1 << INT1);
+  EIFR |= (1 << INTF0) | (1 << INTF1);
+  PCMSK2 |= (1 << PCINT18) | (1 << PCINT19);
+  PCICR |= (1 << PCIE2);
+  PCIFR |= (1 << PCIF2);
   unsigned char data;
-  fifos tmit_fifo = {.read = 0, .write = 1}; //.buffer="Hello"};
+  fifos tmit_fifo = {.read = 0, .write = 1};
   fifos recv_fifo = {.read = 0, .write = 1};
 	
   int percentage = 99;
-  memset(message, '0', 50*sizeof(message[0])); 
+  memset(message, '\0', sizeof(message)); 
   sprintf(message, "%s%d\n", total_percent,percentage);
+  size_array = sizeof(message);
   fill(&tmit_fifo,message); 
 
 	DDRB |= 0b00000001; //LED
@@ -175,6 +209,7 @@ int main(){
         FifoRead(&tmit_fifo, &data);
         USART_Transmit(data);
       }
+      /*
       if ((PIND & (1<<3)) == (1<<3)){
         PORTD |= (0b11100000);
         PORTB |= (0b00000001);
@@ -182,7 +217,7 @@ int main(){
       else{
         PORTD &= ~(0b11100000);
         PORTB &= ~(0b00000001);
-      }
+      }*/
       //sprintf();
       /*	for (i = 0; i<101; i++){
 			setLEDs(i);
